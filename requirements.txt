@@ -1,0 +1,17 @@
+# 核心依赖
+torch>=2.0.0
+numpy>=1.24.0
+sympy>=1.12
+gymnasium>=0.29.0
+
+# ROS2依赖（如果使用真实机器人）
+# 根据您的ROS2版本安装
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tensorboard>=2.14.0
+
+# 其他工具
+tqdm>=4.65.0
+pyyaml>=6.0
