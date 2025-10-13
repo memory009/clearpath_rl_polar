@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-终极可达集可视化
-展示真实轨迹、可达集演化、多误差对比
+终极可达集可视化 - 增强版
+展示真实轨迹、密集可达集演化、多误差对比
 完全基于实际 episode 结果重新设计
 """
 
@@ -104,8 +104,211 @@ def simulate_reachable_tube(pos, yaw, ranges, T=10, dt=0.1):
     
     return all_paths
 
+def create_dense_reachability_tube(agent, env, step_interval=5, obs_error=0.01):
+    """
+    创建密集的可达管道可视化，类似论文图E
+    
+    Parameters:
+    -----------
+    step_interval : int
+        每隔多少步计算一次可达集（越小越密集，但计算量越大）
+    obs_error : float
+        观测误差水平
+    """
+    print(f"\n【2】创建密集可达管道 (error={obs_error*100:.1f}%, interval={step_interval})...")
+    
+    # 1. 运行真实episode
+    trajectory, actions, observations, info = run_actual_episode(agent, env)
+    
+    # 2. 创建画布
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+    
+    # ===== 左图：密集可达管道 =====
+    ax_main = axes[0]
+    ax_main.set_title(f'Dense Reachable Tube (error={obs_error*100:.1f}%, every {step_interval} steps)', 
+                      fontsize=14, fontweight='bold', pad=15)
+    ax_main.set_xlabel('X Position (m)', fontsize=12)
+    ax_main.set_ylabel('Y Position (m)', fontsize=12)
+    ax_main.grid(True, alpha=0.3, linestyle='--')
+    ax_main.set_aspect('equal')
+    
+    # 收集所有可达点用于绘制连续管道
+    all_reachable_points = []
+    step_positions = []
+    
+    # 在更密集的步长上计算可达集
+    total_steps = 0
+    for step_idx in range(0, len(trajectory)-1, step_interval):
+        if step_idx >= len(observations):
+            break
+            
+        obs = observations[step_idx]
+        pos = trajectory[step_idx, :2]
+        yaw = trajectory[step_idx, 2]
+        
+        # 计算可达集
+        is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, obs_error)
+        
+        # 使用更短的预测时间但更密集的采样
+        paths = simulate_reachable_tube(pos, yaw, ranges, T=15, dt=0.1)
+        
+        # 收集这一步的所有可达终点
+        step_reachable_points = np.array([p[-1] for p in paths])
+        all_reachable_points.append(step_reachable_points)
+        step_positions.append(pos)
+        
+        # 绘制更多的路径样本（减少跳步）
+        for path in paths[::2]:  # 每2条画一条，而不是每5条
+            ax_main.plot(path[:, 0], path[:, 1], 
+                        color='lightgreen', alpha=0.03, linewidth=0.3, zorder=1)
+        
+        # 标记当前步的位置
+        if step_idx % (step_interval * 3) == 0:  # 每隔几个采样点标记一下
+            ax_main.plot(pos[0], pos[1], 'o', color='orange', 
+                        markersize=6, alpha=0.6, zorder=8)
+        
+        total_steps += 1
+        if total_steps % 5 == 0:
+            print(f"  ✓ 已处理 {total_steps} 个时间步...")
+    
+    # 绘制真实轨迹（在最上层）
+    ax_main.plot(trajectory[:, 0], trajectory[:, 1], 
+                'b-', linewidth=3.5, label='Actual Trajectory', zorder=10, alpha=0.9)
+    
+    # 起点和终点
+    ax_main.plot(trajectory[0, 0], trajectory[0, 1], 
+                'go', markersize=15, label='Start', zorder=11,
+                markeredgecolor='darkgreen', markeredgewidth=2)
+    ax_main.plot(trajectory[-1, 0], trajectory[-1, 1], 
+                'ro', markersize=15, label='End', zorder=11,
+                markeredgecolor='darkred', markeredgewidth=2)
+    
+    # 目标点
+    goal = env.goal_relative_to_start
+    ax_main.plot(goal[0], goal[1], 'g*', markersize=25, 
+                label='Goal', zorder=12,
+                markeredgecolor='darkgreen', markeredgewidth=2)
+    goal_circle = Circle(goal, 0.3, fill=False, edgecolor='green', 
+                        linestyle='--', linewidth=2, alpha=0.5)
+    ax_main.add_patch(goal_circle)
+    
+    ax_main.legend(loc='upper left', fontsize=10, framealpha=0.95)
+    ax_main.set_xlim(-0.5, 2.5)
+    ax_main.set_ylim(-0.5, 2.5)
+    
+    # ===== 右图：累积可达边界（更像论文图E） =====
+    ax_tube = axes[1]
+    ax_tube.set_title(f'Accumulated Reachable Envelope (error={obs_error*100:.1f}%)', 
+                     fontsize=14, fontweight='bold', pad=15)
+    ax_tube.set_xlabel('X Position (m)', fontsize=12)
+    ax_tube.set_ylabel('Y Position (m)', fontsize=12)
+    ax_tube.grid(True, alpha=0.3, linestyle='--')
+    ax_tube.set_aspect('equal')
+    
+    from scipy.spatial import ConvexHull
+    
+    print(f"  ✓ 绘制累积可达边界...")
+    
+    # 方法1：绘制整体的可达集外包络（全部点的凸包）
+    if len(all_reachable_points) > 0:
+        all_points_combined = np.vstack(all_reachable_points)
+        if len(all_points_combined) > 3:
+            try:
+                hull_global = ConvexHull(all_points_combined)
+                hull_points_global = all_points_combined[hull_global.vertices]
+                hull_points_global = np.vstack([hull_points_global, hull_points_global[0]])
+                
+                # 绘制全局外包络（半透明）
+                ax_tube.fill(hull_points_global[:, 0], hull_points_global[:, 1], 
+                           color='lightgreen', alpha=0.2, zorder=1, label='Overall Envelope')
+                ax_tube.plot(hull_points_global[:, 0], hull_points_global[:, 1], 
+                           color='darkgreen', linewidth=2.5, alpha=0.6, zorder=2)
+            except:
+                pass
+    
+    # 方法2：使用散点密度来显示可达管道
+    # 收集所有中间点（不仅是终点）来显示管道
+    all_tube_points = []
+    for step_idx in range(0, len(trajectory)-1, step_interval):
+        if step_idx >= len(observations):
+            break
+        
+        obs = observations[step_idx]
+        pos = trajectory[step_idx, :2]
+        yaw = trajectory[step_idx, 2]
+        
+        is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, obs_error)
+        paths = simulate_reachable_tube(pos, yaw, ranges, T=15, dt=0.1)
+        
+        # 收集每条路径的所有点（不仅是终点）
+        for path in paths[::3]:  # 采样一部分路径
+            all_tube_points.extend(path[::2])  # 每条路径每隔一个点采样
+    
+    if len(all_tube_points) > 100:
+        all_tube_points = np.array(all_tube_points)
+        
+        # 使用散点图显示密度
+        ax_tube.scatter(all_tube_points[:, 0], all_tube_points[:, 1], 
+                       c='green', s=1, alpha=0.02, zorder=1)
+        
+        # 计算并绘制管道的外边界
+        try:
+            hull_tube = ConvexHull(all_tube_points)
+            hull_points_tube = all_tube_points[hull_tube.vertices]
+            hull_points_tube = np.vstack([hull_points_tube, hull_points_tube[0]])
+            ax_tube.plot(hull_points_tube[:, 0], hull_points_tube[:, 1], 
+                        color='darkgreen', linewidth=2, alpha=0.8, 
+                        label='Reachable Tube Boundary', zorder=3)
+        except:
+            pass
+    
+    # 绘制真实轨迹
+    ax_tube.plot(trajectory[:, 0], trajectory[:, 1], 
+                'b-', linewidth=3.5, label='Actual Trajectory', zorder=10, alpha=0.9)
+    
+    # 起点、终点、目标
+    ax_tube.plot(trajectory[0, 0], trajectory[0, 1], 
+                'go', markersize=15, label='Start', zorder=11,
+                markeredgecolor='darkgreen', markeredgewidth=2)
+    ax_tube.plot(trajectory[-1, 0], trajectory[-1, 1], 
+                'ro', markersize=15, label='End', zorder=11,
+                markeredgecolor='darkred', markeredgewidth=2)
+    ax_tube.plot(goal[0], goal[1], 'g*', markersize=25, 
+                label='Goal', zorder=12,
+                markeredgecolor='darkgreen', markeredgewidth=2)
+    goal_circle2 = Circle(goal, 0.3, fill=False, edgecolor='green', 
+                         linestyle='--', linewidth=2, alpha=0.5)
+    ax_tube.add_patch(goal_circle2)
+    
+    ax_tube.legend(loc='upper left', fontsize=10, framealpha=0.95)
+    ax_tube.set_xlim(-0.5, 2.5)
+    ax_tube.set_ylim(-0.5, 2.5)
+    
+    # 总标题
+    success_text = "✅ SUCCESS" if info.get('goal_reached', False) else "⚠️ INCOMPLETE"
+    plt.suptitle(
+        f'Dense Reachability Tube Visualization - {success_text}\n' +
+        f'Sampled {len(all_reachable_points)} time steps (every {step_interval} steps) | ' +
+        f'Observation Error: {obs_error*100:.1f}%',
+        fontsize=15,
+        fontweight='bold',
+        y=0.98
+    )
+    
+    plt.tight_layout()
+    
+    # 保存
+    filename = f'dense_reachable_tube_err{int(obs_error*100)}_interval{step_interval}.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"\n✓ 已保存: {filename}")
+    print(f"  - 采样了 {len(all_reachable_points)} 个时间步")
+    
+    return trajectory, info
+
 def create_ultimate_visualization(agent, env):
-    """创建终极可达集可视化"""
+    """创建原始的终极可达集可视化（保留兼容性）"""
     
     # 1. 运行真实episode
     trajectory, actions, observations, info = run_actual_episode(agent, env)
@@ -151,9 +354,8 @@ def create_ultimate_visualization(agent, env):
                         label='Goal Region (0.3m)')
     ax_main.add_patch(goal_circle)
     
-    # 关键时刻的可达集 - 使用更大的观测误差以便可视化
+    # 关键时刻的可达集
     colors = ['orange', 'purple', 'cyan', 'magenta']
-    # observation_errors = [0.05, 0.05, 0.05, 0.05]  # 使用5%误差以便看清可达集
     observation_errors = [0.01, 0.01, 0.01, 0.01]
     
     for idx, (step_idx, color, obs_err) in enumerate(zip(key_steps[:-1], colors, observation_errors)):
@@ -164,7 +366,7 @@ def create_ultimate_visualization(agent, env):
         pos = trajectory[step_idx, :2]
         yaw = trajectory[step_idx, 2]
         
-        # 计算可达集 - 使用更大误差
+        # 计算可达集
         is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, obs_err)
         
         v_range = ranges[0][1] - ranges[0][0]
@@ -193,7 +395,7 @@ def create_ultimate_visualization(agent, env):
                             color=color, linewidth=2.5, alpha=0.8,
                             label=f'Reachable @ Step {step_idx} (err={obs_err*100:.0f}%)')
             except:
-                pass  # 如果点太少无法构建凸包
+                pass
         
         # 标记当前位置
         ax_main.plot(pos[0], pos[1], 'o', color=color, 
@@ -283,9 +485,6 @@ def create_ultimate_visualization(agent, env):
     Reachable Set (1%):  
       v: {v_ranges[2]:.4f} m/s
       ω: {omega_ranges[2]:.4f} rad/s
-    
-    Note: Visualization uses 5% error
-    for better visibility of reachable sets
     """
     
     ax_stats.text(0.1, 0.9, stats_text, 
@@ -321,76 +520,23 @@ def create_ultimate_visualization(agent, env):
     
     return trajectory, info
 
-def create_animation_frames(agent, env):
-    """创建逐帧动画（可选）"""
-    print("\n【3】创建动画帧...")
+def compare_error_levels(agent, env, step_interval=5):
+    """
+    比较不同误差水平下的可达管道
+    """
+    print("\n" + "="*70)
+    print(f"比较不同观测误差水平 (采样间隔: {step_interval} steps)")
+    print("="*70)
     
-    trajectory, actions, observations, info = run_actual_episode(agent, env)
+    error_levels = [0.01, 0.05]
     
-    # 每5步创建一帧
-    frame_interval = 5
-    
-    for frame_idx in range(0, len(trajectory)-1, frame_interval):
-        fig, ax = plt.subplots(figsize=(10, 10))
-        ax.set_title(f'Step {frame_idx}/{len(trajectory)-1}', 
-                    fontsize=14, fontweight='bold')
-        ax.set_xlabel('X Position (m)', fontsize=12)
-        ax.set_ylabel('Y Position (m)', fontsize=12)
-        ax.grid(True, alpha=0.3)
-        ax.set_aspect('equal')
-        
-        # 已走过的轨迹
-        ax.plot(trajectory[:frame_idx+1, 0], trajectory[:frame_idx+1, 1],
-               'b-', linewidth=3, alpha=0.7, label='Trajectory')
-        
-        # 当前位置
-        pos = trajectory[frame_idx, :2]
-        yaw = trajectory[frame_idx, 2]
-        
-        ax.plot(pos[0], pos[1], 'ro', markersize=15, zorder=10)
-        
-        # 当前朝向
-        arrow_len = 0.3
-        ax.arrow(pos[0], pos[1],
-                arrow_len * np.cos(yaw), arrow_len * np.sin(yaw),
-                head_width=0.15, head_length=0.1,
-                fc='red', ec='red', linewidth=2, zorder=11)
-        
-        # 当前可达集
-        if frame_idx < len(observations):
-            obs = observations[frame_idx]
-            is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, 0.01)
-            
-            paths = simulate_reachable_tube(pos, yaw, ranges, T=30, dt=0.1)
-            
-            # 绘制可达集边界
-            for path in paths[::10]:  # 每10条画一条
-                ax.plot(path[:, 0], path[:, 1], 'g-', alpha=0.1, linewidth=0.5)
-        
-        # 目标
-        goal = env.goal_relative_to_start
-        ax.plot(goal[0], goal[1], 'g*', markersize=25, zorder=12)
-        goal_circle = Circle(goal, 0.3, fill=False, edgecolor='green',
-                           linestyle='--', linewidth=2)
-        ax.add_patch(goal_circle)
-        
-        ax.set_xlim(-0.5, 2.5)
-        ax.set_ylim(-0.5, 2.5)
-        ax.legend(fontsize=10)
-        
-        filename = f'frame_{frame_idx:03d}.png'
-        plt.savefig(filename, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        if frame_idx % 20 == 0:
-            print(f"  ✓ 生成帧 {frame_idx}/{len(trajectory)-1}")
-    
-    print(f"  ✓ 完成！可用 ffmpeg 合成视频：")
-    print(f"    ffmpeg -framerate 10 -i frame_%03d.png -c:v libx264 animation.mp4")
+    for err in error_levels:
+        print(f"\n处理误差水平: {err*100:.1f}%")
+        create_dense_reachability_tube(agent, env, step_interval=step_interval, obs_error=err)
 
 if __name__ == "__main__":
     print("="*70)
-    print("终极可达集可视化")
+    print("终极可达集可视化 - 增强版")
     print("="*70)
     
     config = TD3Config()
@@ -400,11 +546,32 @@ if __name__ == "__main__":
     model_path = './models/final_20251009_105845'
     agent.load(model_path)
     
-    # 主可视化
-    trajectory, info = create_ultimate_visualization(agent, env)
+    # 选择可视化模式：
+    print("\n选择可视化模式:")
+    print("1. 原始可视化（4个关键时刻）")
+    print("2. 密集可达管道（推荐，类似论文图E）")
+    print("3. 两种都生成")
     
-    # 可选：创建动画帧
-    # create_animation_frames(agent, env)
+    # 默认选择模式3（生成所有可视化）
+    mode = 3
+    
+    if mode == 1:
+        # 原始可视化
+        trajectory, info = create_ultimate_visualization(agent, env)
+    elif mode == 2:
+        # 密集可达管道可视化
+        # 参数调整建议：
+        # step_interval=5: 平衡（约5分钟）
+        # step_interval=3: 密集（约10分钟）
+        # step_interval=1: 极致（约30分钟+）
+        compare_error_levels(agent, env, step_interval=5)
+    else:
+        # 生成所有可视化
+        print("\n生成原始可视化...")
+        trajectory, info = create_ultimate_visualization(agent, env)
+        
+        print("\n生成密集可达管道可视化...")
+        compare_error_levels(agent, env, step_interval=5)
     
     env.close()
     
@@ -412,10 +579,14 @@ if __name__ == "__main__":
     print("✓ 可视化完成！")
     print("="*70)
     print("\n生成的文件:")
-    print("  - ultimate_reachability_visualization.png")
+    print("  - ultimate_reachability_visualization.png (原始版本)")
+    print("  - dense_reachable_tube_err1_interval5.png (密集管道 1%)")
+    print("  - dense_reachable_tube_err5_interval5.png (密集管道 5%)")
     print("\n说明:")
-    print("  ✅ 展示了真实轨迹")
-    print("  ✅ 展示了关键时刻的可达集")
-    print("  ✅ 展示了速度、距离演化")
-    print("  ✅ 分析了观测误差影响")
+    print("  ✅ 左图展示密集采样的可达路径")
+    print("  ✅ 右图展示累积的可达管道边界（类似论文图E）")
+    print("  ✅ 可以调整 step_interval 参数来控制采样密度")
+    print("  ✅ step_interval=5 (当前): 平衡模式")
+    print("  ✅ step_interval=3: 更密集")
+    print("  ✅ step_interval=1: 极致密集（计算时间长）")
     print("="*70)
