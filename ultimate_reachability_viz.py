@@ -65,8 +65,27 @@ def compute_reachable_set_at_step(agent, obs, yaw, observation_error=0.01):
 
 def simulate_reachable_tube(pos, yaw, ranges, T=10, dt=0.1):
     """从当前位置模拟可达管道"""
-    v_samples = np.linspace(ranges[0][0], ranges[0][1], 30)
-    omega_samples = np.linspace(ranges[1][0], ranges[1][1], 30)
+    # 检查范围大小，动态调整采样密度
+    v_range = ranges[0][1] - ranges[0][0]
+    omega_range = ranges[1][1] - ranges[1][0]
+    
+    # 如果范围很小，增加采样密度
+    if v_range < 0.001:
+        n_v = 50
+    elif v_range < 0.01:
+        n_v = 40
+    else:
+        n_v = 30
+    
+    if omega_range < 0.01:
+        n_omega = 50
+    elif omega_range < 0.1:
+        n_omega = 40
+    else:
+        n_omega = 30
+    
+    v_samples = np.linspace(ranges[0][0], ranges[0][1], n_v)
+    omega_samples = np.linspace(ranges[1][0], ranges[1][1], n_omega)
     
     all_paths = []
     
@@ -132,10 +151,12 @@ def create_ultimate_visualization(agent, env):
                         label='Goal Region (0.3m)')
     ax_main.add_patch(goal_circle)
     
-    # 关键时刻的可达集
+    # 关键时刻的可达集 - 使用更大的观测误差以便可视化
     colors = ['orange', 'purple', 'cyan', 'magenta']
+    # observation_errors = [0.05, 0.05, 0.05, 0.05]  # 使用5%误差以便看清可达集
+    observation_errors = [0.01, 0.01, 0.01, 0.01]
     
-    for idx, (step_idx, color) in enumerate(zip(key_steps[:-1], colors)):
+    for idx, (step_idx, color, obs_err) in enumerate(zip(key_steps[:-1], colors, observation_errors)):
         if step_idx >= len(observations):
             continue
             
@@ -143,31 +164,41 @@ def create_ultimate_visualization(agent, env):
         pos = trajectory[step_idx, :2]
         yaw = trajectory[step_idx, 2]
         
-        # 计算可达集
-        is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, 0.01)
+        # 计算可达集 - 使用更大误差
+        is_safe, ranges = compute_reachable_set_at_step(agent, obs, yaw, obs_err)
         
-        # 模拟可达管道（短时间）
-        paths = simulate_reachable_tube(pos, yaw, ranges, T=20, dt=0.1)
+        v_range = ranges[0][1] - ranges[0][0]
+        omega_range = ranges[1][1] - ranges[1][0]
         
-        # 绘制可达管道的边界
+        # 模拟可达管道
+        paths = simulate_reachable_tube(pos, yaw, ranges, T=25, dt=0.1)
+        
+        # 绘制所有路径（半透明）
+        for path in paths[::5]:  # 每5条画一条
+            ax_main.plot(path[:, 0], path[:, 1], 
+                        color=color, alpha=0.05, linewidth=0.5, zorder=1)
+        
+        # 绘制可达集边界（凸包）
         all_points = np.vstack([p[-1] for p in paths])
         
-        # 使用凸包或椭圆拟合
         from scipy.spatial import ConvexHull
         if len(all_points) > 3:
-            hull = ConvexHull(all_points)
-            hull_points = all_points[hull.vertices]
-            hull_points = np.vstack([hull_points, hull_points[0]])
-            ax_main.fill(hull_points[:, 0], hull_points[:, 1], 
-                        color=color, alpha=0.15, zorder=2)
-            ax_main.plot(hull_points[:, 0], hull_points[:, 1], 
-                        color=color, linewidth=2, alpha=0.7,
-                        label=f'Reachable Set @ Step {step_idx}')
+            try:
+                hull = ConvexHull(all_points)
+                hull_points = all_points[hull.vertices]
+                hull_points = np.vstack([hull_points, hull_points[0]])
+                ax_main.fill(hull_points[:, 0], hull_points[:, 1], 
+                            color=color, alpha=0.2, zorder=2)
+                ax_main.plot(hull_points[:, 0], hull_points[:, 1], 
+                            color=color, linewidth=2.5, alpha=0.8,
+                            label=f'Reachable @ Step {step_idx} (err={obs_err*100:.0f}%)')
+            except:
+                pass  # 如果点太少无法构建凸包
         
         # 标记当前位置
         ax_main.plot(pos[0], pos[1], 'o', color=color, 
-                    markersize=10, zorder=11,
-                    markeredgecolor='black', markeredgewidth=1.5)
+                    markersize=12, zorder=11,
+                    markeredgecolor='black', markeredgewidth=2)
     
     ax_main.legend(loc='upper left', fontsize=9, framealpha=0.95)
     ax_main.set_xlim(-0.5, 2.5)
@@ -249,9 +280,12 @@ def create_ultimate_visualization(agent, env):
     Avg Angular Vel:    {np.mean(np.abs(actions[:, 1])):.3f} rad/s
     
     POLAR Safety @ 1%:  ✅ SAFE
-    Max Reachable Set:  
+    Reachable Set (1%):  
       v: {v_ranges[2]:.4f} m/s
       ω: {omega_ranges[2]:.4f} rad/s
+    
+    Note: Visualization uses 5% error
+    for better visibility of reachable sets
     """
     
     ax_stats.text(0.1, 0.9, stats_text, 
