@@ -520,7 +520,7 @@ def create_ultimate_visualization(agent, env):
     
     return trajectory, info
 
-def compare_error_levels(agent, env, step_interval=5):
+def compare_error_levels(agent, env, step_interval=1):
     """
     比较不同误差水平下的可达管道
     """
@@ -571,7 +571,7 @@ if __name__ == "__main__":
         trajectory, info = create_ultimate_visualization(agent, env)
         
         print("\n生成密集可达管道可视化...")
-        compare_error_levels(agent, env, step_interval=5)
+        compare_error_levels(agent, env, step_interval=1)
     
     env.close()
     
