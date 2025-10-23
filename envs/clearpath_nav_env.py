@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Clearpath导航环境 - 修复版
-修复了Gymnasium兼容性问题
-lastest
+修复了Gymnasium兼容性问题和max_steps配置问题
+latest
 """
 
 import rclpy
@@ -25,17 +25,30 @@ class ClearpathNavEnv(gym.Env):
     metadata = {'render_modes': []}
     
     def __init__(self, robot_name='j100_0000', goal_pos=(2.0, 2.0), 
-                 max_steps=256, collision_threshold=0.3):
+                 max_steps=None, collision_threshold=0.3):
         """
         初始化环境
         
         Args:
             robot_name: 机器人命名空间
             goal_pos: 目标位置 (x, y) - world坐标系
-            max_steps: 每个episode最大步数
+            max_steps: 每个episode最大步数。如果为None,从config.py读取。
+                      收集演示时可显式传入更大的值(如1024)
             collision_threshold: 碰撞阈值（米）
         """
         super().__init__()
+        
+        # 处理max_steps参数
+        if max_steps is None:
+            try:
+                from utils.config import TD3Config
+                max_steps = TD3Config.max_steps
+                print(f"📝 从config.py读取max_steps: {max_steps}")
+            except (ImportError, AttributeError):
+                max_steps = 256
+                print(f"⚠️  无法导入config.py,使用默认max_steps: {max_steps}")
+        else:
+            print(f"📝 使用显式传入的max_steps: {max_steps}")
         
         # 初始化ROS2
         if not rclpy.ok():
