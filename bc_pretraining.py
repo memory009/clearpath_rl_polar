@@ -245,8 +245,11 @@ class BCTrainer:
         print(f"\n{'='*60}")
         print(f"BC训练完成")
         print(f"{'='*60}")
-        print(f"  最佳验证损失: {best_val_loss:.6f}")
-        print(f"  最终训练损失: {self.train_losses[-1]:.6f}")
+        if num_epochs > 0 and len(self.train_losses) > 0:
+            print(f"  最佳验证损失: {best_val_loss:.6f}")
+            print(f"  最终训练损失: {self.train_losses[-1]:.6f}")
+        else:
+            print(f"  ⚠️  未进行训练 (epochs=0)")
         print(f"{'='*60}\n")
         
         return best_val_loss
@@ -370,6 +373,9 @@ def evaluate_bc_policy(agent, env, num_episodes=10):
     print(f"\n{'='*60}")
     print(f"评估BC预训练策略")
     print(f"{'='*60}")
+
+    max_steps = env.max_steps
+    print(f"评估时的最大步数: {max_steps}")
     
     success_count = 0
     total_rewards = []
@@ -382,7 +388,7 @@ def evaluate_bc_policy(agent, env, num_episodes=10):
         episode_steps = 0
         
         done = False
-        while not done and episode_steps < 256:
+        while not done and episode_steps < max_steps:
             # 使用策略选择动作(无噪声)
             action = agent.select_action(state)
             
@@ -448,8 +454,10 @@ if __name__ == '__main__':
                        help='验证集比例')
     parser.add_argument('--evaluate', action='store_true',
                        help='训练后评估策略')
-    parser.add_argument('--eval_goal', type=str, default='2.0,2.0',
+    parser.add_argument('--eval_goal', type=str, default='5.0,-0.5',
                        help='评估目标位置')
+    parser.add_argument('--eval_max_steps', type=int, default=1024,
+                   help='评估时的最大步数')
     
     args = parser.parse_args()
     
@@ -469,7 +477,7 @@ if __name__ == '__main__':
             from envs.clearpath_nav_env import ClearpathNavEnv
             
             eval_goal = tuple(map(float, args.eval_goal.split(',')))
-            env = ClearpathNavEnv(goal_pos=eval_goal)
+            env = ClearpathNavEnv(goal_pos=eval_goal, max_steps=args.eval_max_steps)
             
             results = evaluate_bc_policy(agent, env, num_episodes=10)
             
