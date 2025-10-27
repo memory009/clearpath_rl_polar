@@ -18,13 +18,13 @@ print("="*70)
 
 config = TD3Config()
 agent = TD3Agent(12, 2, 0.5, config)
-agent.load('./models/final_20251009_105845')
+agent.load('./models/final_20251026_162208')
 
 # 测试1: 在原始目标点上测试一致性
-print("\n【测试1】在训练目标(2,2)上的一致性")
+print("\n【测试1】在训练目标(3,-2)上的一致性")
 print("运行10次episode，记录步数和轨迹...")
 
-original_env = ClearpathNavEnv(goal_pos=(2.0, 2.0))
+original_env = ClearpathNavEnv(goal_pos=(3.0, -2.0))
 original_steps = []
 original_actions = []
 
@@ -78,14 +78,12 @@ print("【测试2】泛化能力测试 - 不同目标点")
 print(f"{'='*70}")
 
 test_goals = [
-    (1.0, 1.0, "近距离"),
-    (2.0, 2.0, "训练目标"),
-    (3.0, 3.0, "中距离"),
-    (4.0, 4.0, "远距离"),
-    (5.0, 5.0, "很远"),
-    (2.0, 3.0, "不同方向1"),
-    (3.0, 2.0, "不同方向2"),
-    (1.5, 2.5, "不同方向3"),
+        (3.0, -2.0, '训练目标'),  # 先测试训练目标
+        (2.0, 2.0, '左上'),
+        (-2.0, 2.0, '左下'),
+        (-2.0, -2.0, '右下'),
+        (3.0, 0.0, '上中'),
+        (0.0, 3.0, '左中'),
 ]
 
 results = []
@@ -134,10 +132,10 @@ print(f"\n{'='*70}")
 print("诊断结论")
 print(f"{'='*70}")
 
-training_goal_result = [r for r in results if r['goal'] == (2.0, 2.0)][0]
-other_results = [r for r in results if r['goal'] != (2.0, 2.0)]
+training_goal_result = [r for r in results if r['goal'] == (3.0, -2.0)][0]
+other_results = [r for r in results if r['goal'] != (3.0, -2.0)]
 
-print(f"\n1. 训练目标(2,2)性能:")
+print(f"\n1. 训练目标(3,-2)性能:")
 print(f"   成功率: {training_goal_result['success_rate']*100:.0f}%")
 print(f"   步数标准差: {training_goal_result['std_steps']:.2f}")
 
@@ -201,7 +199,7 @@ try:
     # 左图: 距离 vs 成功率
     distances = [r['distance'] for r in results]
     success_rates = [r['success_rate']*100 for r in results]
-    colors = ['red' if r['goal'] == (2.0, 2.0) else 'blue' for r in results]
+    colors = ['red' if r['goal'] == (3.0, -2.0) else 'blue' for r in results]
     
     axes[0].scatter(distances, success_rates, c=colors, s=100, alpha=0.6)
     axes[0].axhline(y=100, color='green', linestyle='--', alpha=0.3)
@@ -209,7 +207,7 @@ try:
     axes[0].set_ylabel('Success Rate (%)')
     axes[0].set_title('Generalization Test')
     axes[0].grid(True, alpha=0.3)
-    axes[0].legend(['Training goal (2,2)', 'Other goals'], loc='lower left')
+    axes[0].legend(['Training goal (3,-2)', 'Other goals'], loc='lower left')
     
     # 右图: 距离 vs 平均步数
     avg_steps = [r['avg_steps'] for r in results]
